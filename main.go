@@ -50,17 +50,28 @@ type FailedResponse struct {
 
 // ErrorResponse represents an error response
 type ErrorResponse struct {
-	ActionStatus    string `json:"actionStatus"`
-	ErrorMessage    string `json:"error"`
+	ActionStatus     string `json:"actionStatus"`
+	Error            string `json:"error"`
 	ErrorDescription string `json:"errorDescription"`
 }
 
+// sendJSONResponse is a helper function to send JSON responses
+func sendJSONResponse(w http.ResponseWriter, statusCode int, response interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, `{"actionStatus":"ERROR","error":"encoding_failed","errorDescription":"Failed to encode JSON"}`, http.StatusInternalServerError)
+	}
+}
+
 func passwordValidationHandler(w http.ResponseWriter, r *http.Request) {
+	// Ensure the response is always JSON
+	w.Header().Set("Content-Type", "application/json")
+
 	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			ActionStatus:    "ERROR",
-			ErrorMessage:    "invalid_request",
+		sendJSONResponse(w, http.StatusMethodNotAllowed, ErrorResponse{
+			ActionStatus:     "ERROR",
+			Error:            "invalid_request",
 			ErrorDescription: "Invalid request method",
 		})
 		return
@@ -69,10 +80,9 @@ func passwordValidationHandler(w http.ResponseWriter, r *http.Request) {
 	var payload RequestPayload
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&payload); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{
-			ActionStatus:    "ERROR",
-			ErrorMessage:    "invalid_payload",
+		sendJSONResponse(w, http.StatusBadRequest, ErrorResponse{
+			ActionStatus:     "ERROR",
+			Error:            "invalid_payload",
 			ErrorDescription: "Invalid request payload",
 		})
 		return
@@ -82,18 +92,16 @@ func passwordValidationHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if password is one of the disallowed values
 	if password == "admin123" || password == "password123" {
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(FailedResponse{
+		sendJSONResponse(w, http.StatusOK, FailedResponse{
 			ActionStatus:       "FAILED",
-			FailureReason:      "common_password",
-			FailureDescription: "The provided password is common password.",
+			FailureReason:      "password_compromised",
+			FailureDescription: "The provided password is compromised.",
 		})
 		return
 	}
 
 	// Success response if password is valid
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(SuccessResponse{
+	sendJSONResponse(w, http.StatusOK, SuccessResponse{
 		ActionStatus: "SUCCESS",
 	})
 }
