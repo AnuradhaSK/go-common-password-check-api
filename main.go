@@ -82,7 +82,7 @@ func passwordValidationHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if password is one of the disallowed values
 	if password == "admin123" || password == "password123" {
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(FailedResponse{
 			ActionStatus:       "FAILED",
 			FailureReason:      "common_password",
