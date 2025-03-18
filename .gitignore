@@ -1,0 +1,15 @@
+# Ignore Go binaries
+*.exe
+*.out
+*.o
+*.so
+*.dll
+
+# Ignore Go dependencies (if using vendor)
+vendor/
+
+# Ignore temporary & system files
+*.log
+*.tmp
+.DS_Store
+
