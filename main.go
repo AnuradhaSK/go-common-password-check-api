@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 )
 
 // RequestPayload represents the expected request structure
@@ -41,7 +44,7 @@ type SuccessResponse struct {
 	ActionStatus string `json:"actionStatus"`
 }
 
-// FailedResponse represents a failed response
+// FailedResponse represents a failed response but with HTTP 200
 type FailedResponse struct {
 	ActionStatus       string `json:"actionStatus"`
 	FailureReason      string `json:"failureReason"`
@@ -55,6 +58,28 @@ type ErrorResponse struct {
 	ErrorDescription string `json:"errorDescription"`
 }
 
+// Load common passwords from a file
+func loadCommonPasswords(filename string) (map[string]bool, error) {
+	commonPasswords := make(map[string]bool)
+
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		commonPasswords[strings.TrimSpace(scanner.Text())] = true
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return commonPasswords, nil
+}
+
 // sendJSONResponse is a helper function to send JSON responses
 func sendJSONResponse(w http.ResponseWriter, statusCode int, response interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -64,50 +89,59 @@ func sendJSONResponse(w http.ResponseWriter, statusCode int, response interface{
 	}
 }
 
-func passwordValidationHandler(w http.ResponseWriter, r *http.Request) {
-	// Ensure the response is always JSON
-	w.Header().Set("Content-Type", "application/json")
+func passwordValidationHandler(commonPasswords map[string]bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Ensure the response is always JSON
+		w.Header().Set("Content-Type", "application/json")
 
-	if r.Method != http.MethodPost {
-		sendJSONResponse(w, http.StatusMethodNotAllowed, ErrorResponse{
-			ActionStatus:     "ERROR",
-			Error:            "invalid_request",
-			ErrorDescription: "Invalid request method",
+		if r.Method != http.MethodPost {
+			sendJSONResponse(w, http.StatusMethodNotAllowed, ErrorResponse{
+				ActionStatus:     "ERROR",
+				Error:            "invalid_request",
+				ErrorDescription: "Invalid request method",
+			})
+			return
+		}
+
+		var payload RequestPayload
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(&payload); err != nil {
+			sendJSONResponse(w, http.StatusBadRequest, ErrorResponse{
+				ActionStatus:     "ERROR",
+				Error:            "invalid_payload",
+				ErrorDescription: "Invalid request payload",
+			})
+			return
+		}
+
+		password := payload.Event.User.UpdatingCredential.Value
+
+		// Check if password is in the common passwords list
+		if commonPasswords[password] {
+			sendJSONResponse(w, http.StatusOK, FailedResponse{
+				ActionStatus:       "FAILED",
+				FailureReason:      "common_password",
+				FailureDescription: "The provided password is a common password.",
+			})
+			return
+		}
+
+		// Success response if password is valid
+		sendJSONResponse(w, http.StatusOK, SuccessResponse{
+			ActionStatus: "SUCCESS",
 		})
-		return
 	}
-
-	var payload RequestPayload
-	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&payload); err != nil {
-		sendJSONResponse(w, http.StatusBadRequest, ErrorResponse{
-			ActionStatus:     "ERROR",
-			Error:            "invalid_payload",
-			ErrorDescription: "Invalid request payload",
-		})
-		return
-	}
-
-	password := payload.Event.User.UpdatingCredential.Value
-
-	// Check if password is one of the disallowed values
-	if password == "admin123" || password == "password123" {
-		sendJSONResponse(w, http.StatusOK, FailedResponse{
-			ActionStatus:       "FAILED",
-			FailureReason:      "password_compromised",
-			FailureDescription: "The provided password is compromised.",
-		})
-		return
-	}
-
-	// Success response if password is valid
-	sendJSONResponse(w, http.StatusOK, SuccessResponse{
-		ActionStatus: "SUCCESS",
-	})
 }
 
 func main() {
-	http.HandleFunc("/", passwordValidationHandler)
+	// Load common passwords from "resources/common-passwords.txt"
+	commonPasswords, err := loadCommonPasswords("resources/common-passwords.txt")
+	if err != nil {
+		fmt.Println("Error loading common passwords:", err)
+		return
+	}
+
+	http.HandleFunc("/", passwordValidationHandler(commonPasswords))
 
 	port := 8080
 	fmt.Printf("Server is running on port %d...\n", port)
